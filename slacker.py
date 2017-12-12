@@ -33,7 +33,7 @@ class Slacker():
 
     def reset_timer(self):
         self.notify_slack("timer restarted")
-        self.timestamp = datetime.now()
+        self.timestamp = datetime.utcnow()
 
     def calculate_seconds_elapsed(self):
         tdelta = self.timestamp - self.last_checked_in()
