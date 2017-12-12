@@ -1,35 +1,96 @@
+#!/usr/bin/env python3
 
-import re
-from flask import Flask, render_template, url_for, redirect, request, flash
+import os
+import json
+from datetime import datetime
 
-app = Flask(__name__)
-app.config['SECRET_KEY'] = 'a very secret string'
+import slacker
+from config import config
+
+from flask import (Flask, make_response, render_template, flash, redirect,
+                   request, url_for)
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.exc import IntegrityError
+from flask_restful import Resource, Api
 
 
+api_path = "/api/v1/"
+DEBUG = True
+
+
+def create_app(config_name=None):
+
+    # flask
+    app = Flask(__name__)
+    app.config.from_object(config)
+
+    # flask-sqlalchemy
+    app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+    # database
+    db = SQLAlchemy(app)
+    db.init_app(app)
+
+    return app
+
+app = create_app()
+db = SQLAlchemy(app)
+
+
+# flask-restful
+api = Api(app)
+
+# allow cross-origin resource sharing:
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add(
+        'Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE')
+    return response
+
+import models, serializers
+
+# Set routes
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template(
+        "index.html")
 
-@app.route('/custom', methods=['GET', 'POST'])
-def custom():
-    time = request.form.get('time', 180)
-    # use re to validate input data
-    m = re.match('\d+[smh]?$', time)
-    if m is None:
-        flash(u'huh')
-        return redirect(url_for('index'))
-    if time[-1] not in 'smh':
-        return redirect(url_for('timer', num=int(time)))
-    else:
-        type = {'s': 'timer', 'm': 'minutes', 'h': 'hours'}
-        return redirect(url_for(type[time[-1]], num=int(time[:-1])))
+class HeartBeatView(Resource):
+    def get(self, id=None):
+        if not id:
+            heartbeats = models.HeartBeat.query.all()
+        else:
+            heartbeats = [db.session.query(models.HeartBeat).get(id)]
+        return serializers.HeartBeatSerializer(heartbeats, many=True).data
+
+    def put(self):
+        id = 1
+        dt = datetime.utcnow()
+        heartbeat = [db.session.query(models.HeartBeat).get(id)]
+        if not heartbeat:
+            heartbeat = models.HeartBeat(id=id, timestamp=dt)
+        else:
+            heartbeat = heartbeat[0]
+            heartbeat.timestamp = dt
+        db.session.add(heartbeat)
+        db.session.commit()
+        return "ok", 201
+
+    def delete(self, id):
+        try:
+            heartbeat = db.session.query(models.HeartBeat).get(id)
+            db.session.delete(heartbeat)
+            db.session.commit()
+            return "No Content", 204
+        except Exception:
+            return "Error Deleting " + id, 500
 
 
+api.add_resource(HeartBeatView, api_path + 'heartbeat',
+                 api_path + 'heartbeat/<string:id>', strict_slashes=False)
 
-@app.route('/reset')
-def resettime():
-    w2txt = open('txt', 'w')
-    w2txt.write('301')
-    w2txt.close()
-#flash pop message?
-    return redirect('/')
+
+if __name__ == "__main__":
+    app.run(debug=DEBUG)
